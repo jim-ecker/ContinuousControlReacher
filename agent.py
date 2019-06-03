@@ -5,6 +5,7 @@ import numpy as np
 from model import ActorCritic
 from utils import timeit
 
+
 class Agent:
 
     def __init__(self, env, name, num_agents, size_state, size_action, discount_rate=0.99, tau=0.95, num_rollout=10,
@@ -23,8 +24,8 @@ class Agent:
         self.clip_gradient = clip_gradient
         self.num_minibatch = num_minibatch
 
-    def generate_rollout(self):
-        rollout = []
+    def collect_trajectories(self):
+        trajectories = []
         episode_rewards = np.zeros(self.num_agents)
 
         #reset env
@@ -32,7 +33,7 @@ class Agent:
         states   = env_info.vector_observations
 
         while True:
-            states = torch.Tensor(states).cuda()
+            states = torch.Tensor(states).cuda() if 'cuda' in str(self.network.device) else torch.Tensor(states).cpu()
             actions, log_probs, values = self.network(states)
             env_info = self.env.step(actions.cpu().detach().numpy())[self.name]
             rewards = env_info.rewards
@@ -40,27 +41,28 @@ class Agent:
             next_states = env_info.vector_observations
 
             episode_rewards += rewards
-            rollout.append([states, values.detach(), actions.detach(), log_probs.detach(), rewards, 1 - dones])
+            trajectories.append([states, values.detach(), actions.detach(), log_probs.detach(), rewards, 1 - dones])
             states = next_states
 
             if np.any(dones):
                 break
 
-        states = torch.Tensor(states).cuda()
+        # get last trajectory
+        states = torch.Tensor(states).cuda() if 'cuda' in str(self.network.device) else torch.Tensor(states).cpu()
         _, _, last_value = self.network(states)
-        rollout.append([states, last_value, None, None, None, None])
+        trajectories.append([states, last_value, None, None, None, None])
 
-        return rollout, last_value, episode_rewards
+        return trajectories, last_value, episode_rewards
 
     def process_rollout(self, rollout, last_value):
         processed_rollout = [None] * (len(rollout) - 1)
-        advantages = torch.zeros((self.num_agents, 1)).cuda()
+        advantages = torch.zeros((self.num_agents, 1)).cuda() if 'cuda' in str(self.network.device) else torch.zeros((self.num_agents, 1)).cpu()
         returns = last_value.detach()
 
         for i in reversed(range(len(rollout) - 1)):
             states, value, actions, log_probs, rewards, dones = rollout[i]
-            dones = torch.Tensor(dones).unsqueeze(1).cuda()
-            rewards = torch.Tensor(rewards).unsqueeze(1).cuda()
+            dones = torch.Tensor(dones).unsqueeze(1).cuda() if 'cuda' in str(self.network.device) else torch.Tensor(dones).unsqueeze(1).cpu()
+            rewards = torch.Tensor(rewards).unsqueeze(1).cuda() if 'cuda' in str(self.network.device) else torch.Tensor(rewards).unsqueeze(1).cpu()
             next_value = rollout[i + 1][1]
             returns = rewards + self.discount_rate * dones * returns
 
@@ -69,6 +71,7 @@ class Agent:
             processed_rollout[i] = [states, actions, log_probs, returns, advantages]
 
         return processed_rollout
+
 
     def train_network(self, states, actions, log_probs_old, returns, advantages):
 
@@ -99,7 +102,7 @@ class Agent:
 
     def step(self):
         # Run a single episode to generate a rollout
-        rollout, last_value, episode_rewards = self.generate_rollout()
+        rollout, last_value, episode_rewards = self.collect_trajectories()
         # Process the rollout to calculate advantages
         processed_rollout = self.process_rollout(rollout, last_value)
         states, actions, log_probs_old, returns, advantages = map(lambda x: torch.cat(x, dim=0),
