@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-from model import Policy
+from model import PPONetwork
 
 
 class Agent:
@@ -14,7 +14,7 @@ class Agent:
         self.num_agents    = num_agents
         self.size_state    = size_state
         self.size_action   = size_action
-        self.policy        = Policy(size_state, size_action)
+        self.policy        = PPONetwork(size_state, size_action)
         self.optimizer     = optim.Adam(self.policy.parameters(), 2e-4, eps=1e-5)
         self.discount_rate = discount_rate
         self.tau           = tau
